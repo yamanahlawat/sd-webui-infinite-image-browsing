@@ -1,5 +1,6 @@
 from sqlite3 import Connection, connect
 from typing import Dict, List, Optional
+from threading import Lock
 from scripts.tool import (
     cwd,
     get_modified_date,
@@ -11,6 +12,7 @@ from contextlib import closing
 import os
 import threading
 
+db_lock = Lock()
 
 class DataBase:
     local = threading.local()
@@ -65,12 +67,14 @@ class Image:
         }
 
     def save(self, conn):
-        with closing(conn.cursor()) as cur:
-            cur.execute(
-                "INSERT OR REPLACE  INTO image (path, exif, size, date) VALUES (?, ?, ?, ?)",
-                (self.path, self.exif, self.size, self.date),
-            )
-            self.id = cur.lastrowid
+        with db_lock:
+            with closing(conn.cursor()) as cur:
+                cur.execute(
+                    "INSERT OR REPLACE  INTO image (path, exif, size, date) VALUES (?, ?, ?, ?)",
+                    (self.path, self.exif, self.size, self.date),
+                )
+                conn.commit()
+                self.id = cur.lastrowid
 
     @classmethod
     def get(cls, conn: Connection, id_or_path):
@@ -149,12 +153,14 @@ class Tag:
         self.display_name = tags_translate.get(name)
 
     def save(self, conn):
-        with closing(conn.cursor()) as cur:
-            cur.execute(
-                "INSERT OR REPLACE INTO tag (id, name, score, type, count) VALUES (?, ?, ?, ?, ?)",
-                (self.id, self.name, self.score, self.type, self.count),
-            )
-            self.id = cur.lastrowid
+        with db_lock:
+            with closing(conn.cursor()) as cur:
+                cur.execute(
+                    "INSERT OR REPLACE INTO tag (id, name, score, type, count) VALUES (?, ?, ?, ?, ?)",
+                    (self.id, self.name, self.score, self.type, self.count),
+                )
+                conn.commit()
+                self.id = cur.lastrowid
 
     @classmethod
     def remove(cls, conn, tag_id):
@@ -215,24 +221,26 @@ class Tag:
 
     @classmethod
     def create_table(cls, conn):
-        with closing(conn.cursor()) as cur:
-            cur.execute(
-                """CREATE TABLE IF NOT EXISTS tag (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT,
-            score INTEGER,
-            type TEXT,
-            count INTEGER,
-            UNIQUE(name, type) ON CONFLICT REPLACE
-            );
-            """
-            )
-            cur.execute("CREATE INDEX IF NOT EXISTS tag_idx_name ON tag(name)")
-            cur.execute(
-                """INSERT OR IGNORE INTO tag(name, score, type, count)
-                VALUES ("like", 0, "custom", 0);
+        with db_lock:
+            with closing(conn.cursor()) as cur:
+                cur.execute(
+                    """CREATE TABLE IF NOT EXISTS tag (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT,
+                score INTEGER,
+                type TEXT,
+                count INTEGER,
+                UNIQUE(name, type) ON CONFLICT REPLACE
+                );
                 """
-            )
+                )
+                cur.execute("CREATE INDEX IF NOT EXISTS tag_idx_name ON tag(name)")
+                cur.execute(
+                    """INSERT OR IGNORE INTO tag(name, score, type, count)
+                    VALUES ("like", 0, "custom", 0);
+                    """
+                )
+                conn.commit()
 
 
 class ImageTag:
@@ -242,11 +250,13 @@ class ImageTag:
         self.tag_id = tag_id
 
     def save(self, conn):
-        with closing(conn.cursor()) as cur:
-            cur.execute(
-                "INSERT INTO image_tag (image_id, tag_id) VALUES (?, ?)",
-                (self.image_id, self.tag_id),
-            )
+        with db_lock:
+            with closing(conn.cursor()) as cur:
+                cur.execute(
+                    "INSERT INTO image_tag (image_id, tag_id) VALUES (?, ?)",
+                    (self.image_id, self.tag_id),
+                )
+            conn.commit()
 
     @classmethod
     def get_tags_for_image(
@@ -389,19 +399,23 @@ class Floder:
     @classmethod
     def update_modified_date_or_create(cls, conn: Connection, folder_path: str):
         folder_path = os.path.normpath(folder_path)
-        with closing(conn.cursor()) as cur:
-            cur.execute("SELECT * FROM folders WHERE path = ?", (folder_path,))
-            row = cur.fetchone()
-            if row:
-                cur.execute(
-                    "UPDATE folders SET modified_date = ? WHERE path = ?",
-                    (get_modified_date(folder_path), folder_path),
-                )
-            else:
-                cur.execute(
-                    "INSERT INTO folders (path, modified_date) VALUES (?, ?)",
-                    (folder_path, get_modified_date(folder_path)),
-                )
+        with db_lock:
+            with closing(conn.cursor()) as cur:
+                cur.execute("SELECT * FROM folders WHERE path = ?", (folder_path,))
+                row = cur.fetchone()
+                if row:
+                    cur.execute(
+                        "UPDATE folders SET modified_date = ? WHERE path = ?",
+                        (get_modified_date(folder_path), folder_path),
+                    )
+                    conn.commit()
+                else:
+                    cur.execute(
+                        "INSERT INTO folders (path, modified_date) VALUES (?, ?)",
+                        (folder_path, get_modified_date(folder_path)),
+                    )
+                    conn.commit()
+                
 
     @classmethod
     def get_expired_dirs(cls, conn: Connection):
