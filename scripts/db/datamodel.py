@@ -35,6 +35,7 @@ class DataBase:
     def init(clz):
         # 创建连接并打开数据库
         conn = connect(os.path.join(cwd, "iib.db"))
+        clz.local.conn = conn
         Floder.create_table(conn)
         ImageTag.create_table(conn)
         Tag.create_table(conn)
