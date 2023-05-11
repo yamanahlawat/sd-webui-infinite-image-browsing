@@ -24,28 +24,28 @@ class DataBase:
     @classmethod
     def get_conn(clz) -> Connection:
         # for : sqlite3.ProgrammingError: SQLite objects created in a thread can only be used in that same thread
-        if hasattr(clz.local, "conn"):
-            return clz.local.conn
-        else:
-            conn = clz.init()
-            clz.local.conn = conn
-            return conn
+        if not hasattr(clz.local, "conn"):
+            clz.local.conn = clz.init()
+        return clz.local.conn
 
     @classmethod
     def init(clz):
-        # 创建连接并打开数据库
+        # create connection and open database
         conn = connect(os.path.join(cwd, "iib.db"))
-        clz.local.conn = conn
+        clz.create_tables(conn)
+        clz.num += 1
+        if is_dev:
+            print(f"Current connection number {clz.num}")
+        return conn
+
+    @classmethod
+    def create_tables(clz, conn):
+        # create tables
         Floder.create_table(conn)
         ImageTag.create_table(conn)
         Tag.create_table(conn)
         Image.create_table(conn)
         conn.commit()
-        clz.num += 1
-        if is_dev:
-            print(f"当前连接数{clz.num}")
-        return conn
-
 
 class Image:
     def __init__(self, path, exif=None, size=0, date="", id=None):
